@@ -72,10 +72,20 @@ const EPSOM_SO4 = 103;
 /**
  * 88% Lactic Acid: ~0.684 mL neutralizes 50 ppm alkalinity (as CaCO3) per gallon.
  * Rearranged: each mL of 88% lactic acid reduces alkalinity by ~73 ppm per gallon.
- *
- * Mash pH drop: roughly 0.1 pH per 50 ppm alkalinity reduction (approximate).
  */
 const LACTIC_88_ALK_REDUCTION_PER_ML_PER_GAL = 73;
+
+/**
+ * Kolbach Residual Alkalinity divisors.
+ * RA = Alkalinity(as CaCO3) - Ca/1.4 - Mg/1.7
+ *
+ * Calcium and magnesium react with mash phosphates, effectively lowering
+ * mash pH independent of acid additions. RA represents the remaining
+ * alkalinity that the brewer must neutralize with acid. At RA ≈ 0 a
+ * pale-malt mash lands near pH 5.4.
+ */
+const KOLBACH_CA_DIVISOR = 1.4;
+const KOLBACH_MG_DIVISOR = 1.7;
 
 export function calculate(
   source: WaterProfile,
@@ -113,30 +123,36 @@ export function calculate(
   const epsom = round(epsomPerGal * batchGallons, 1);
   const calciumChloride = round(cacl2PerGal * batchGallons, 1);
 
-  // Step 4: Lactic acid for alkalinity / pH
-  // Target mash pH (from style). Source pH and alkalinity determine how
-  // much acid is needed.
-  const targetPh = target.ph_target;
-  const phDrop = source.ph - targetPh;
+  // Step 4: Lactic acid via Residual Alkalinity (Kolbach formula)
+  //
+  // RA = Alkalinity - Ca/1.4 - Mg/1.7
+  //
+  // Ca and Mg from salt additions react with mash phosphates, naturally
+  // lowering mash pH. RA captures how much buffering capacity remains
+  // after that effect. At RA ≈ 0 a pale-malt mash lands near pH 5.4;
+  // we neutralize any positive RA with lactic acid.
+  const adjustedCa = source.ca + caFromGypsum + cacl2PerGal * CACL2_CA;
+  const adjustedMg = source.mg + epsomPerGal * EPSOM_MG;
 
-  // Alkalinity to neutralize: we want to bring residual alkalinity down
-  // enough to achieve target mash pH. A rough model:
-  // Each 50 ppm reduction in alkalinity drops mash pH by ~0.1
-  // So ppm reduction needed = phDrop * 500
-  const alkReductionPpm = Math.max(0, phDrop * 500);
+  const residualAlk =
+    source.alkalinity -
+    adjustedCa / KOLBACH_CA_DIVISOR -
+    adjustedMg / KOLBACH_MG_DIVISOR;
 
-  // mL of 88% lactic acid needed for the full batch
-  const lacticPerGal = alkReductionPpm / LACTIC_88_ALK_REDUCTION_PER_ML_PER_GAL;
+  const alkToNeutralize = Math.max(0, residualAlk);
+
+  // mL of 88% lactic acid for the full batch
+  const lacticPerGal = alkToNeutralize / LACTIC_88_ALK_REDUCTION_PER_ML_PER_GAL;
   const lacticAcid = round(lacticPerGal * batchGallons, 1);
 
   // Compute adjusted profile
   const adjusted: AdjustedProfile = {
-    ca: round(source.ca + caFromGypsum + cacl2PerGal * CACL2_CA, 1),
-    mg: round(source.mg + epsomPerGal * EPSOM_MG, 1),
+    ca: round(adjustedCa, 1),
+    mg: round(adjustedMg, 1),
     na: source.na, // unchanged by these salts
     cl: round(source.cl + clFromCaCl2, 1),
     so4: round(source.so4 + so4FromEpsom + gypsumPerGal * GYPSUM_SO4, 1),
-    ph: round(targetPh, 1),
+    ph: round(target.ph_target, 1),
   };
 
   return {

@@ -6,6 +6,8 @@ import {
   type CalculationResult,
 } from "./calculator";
 
+declare const __APP_VERSION__: string;
+
 // Default source water: Meridian/83709 well baseline
 const DEFAULT_SOURCE: WaterProfile = {
   ca: 37.1,
@@ -167,7 +169,7 @@ export default function App() {
       </Section>
 
       <footer className="mt-8 text-center text-xs text-gray-600">
-        beer.w7hak.com
+        beer.w7hak.com &middot; v{__APP_VERSION__}
       </footer>
     </div>
   );
