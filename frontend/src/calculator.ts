@@ -72,9 +72,6 @@ const EPSOM_SO4 = 103;
 // ── Lactic acid constants ────────────────────────────────────────────
 const GAL_TO_LITERS = 3.78541;
 
-/** Default fraction of total batch used as mash/strike water. */
-const STRIKE_WATER_RATIO = 0.75;
-
 /**
  * 88% Lactic Acid: 1 milliequivalent (mEq) ≈ 0.09 mL.
  * 1 mEq neutralizes 50 mg/L (ppm) CaCO3 alkalinity per liter of water.
@@ -88,7 +85,7 @@ const MEQ_ALK_PER_LITER = 50;
  * Light-grain styles targeting pH 5.3 need ~80-85% of source alkalinity
  * neutralized; darker-grain styles targeting pH 5.4 need ~50-60%.
  * Values are linearly interpolated between these reference points and
- * clamped to [NEUT_FRAC_HIGH, NEUT_FRAC_LOW].
+ * clamped to [NEUT_FRAC_AT_HIGH, NEUT_FRAC_AT_LOW].
  */
 const NEUT_PH_LOW = 5.3;
 const NEUT_PH_HIGH = 5.4;
@@ -102,12 +99,33 @@ function neutralizationFraction(targetPh: number): number {
   return NEUT_FRAC_AT_LOW + t * (NEUT_FRAC_AT_HIGH - NEUT_FRAC_AT_LOW);
 }
 
+// ── Grain-buffer model (RO / low-alkalinity water) ───────────────────
 /**
- * Calculate mL of 88 % lactic acid needed to neutralize the required
- * fraction of source alkalinity in the strike/mash water.
+ * With DI/RO water a pale-malt mash lands near pH 5.7.
+ * To push below that the brewer must add acid to overcome
+ * the grain's own buffering capacity.
  *
- * @param sourceAlkalinity - Source water alkalinity in ppm as CaCO3
- * @param targetPh         - Desired mash pH (e.g. 5.3)
+ * Typical pale-malt buffer ≈ 7 mEq per pH unit per gallon of
+ * strike water (derived from ~45 mEq/kg at standard grist ratios).
+ */
+const GRAIN_DI_MASH_PH = 5.7;
+const GRAIN_BUFFER_MEQ_PER_PH_PER_GAL = 7;
+
+/**
+ * Calculate mL of 88 % lactic acid needed to reach the target mash pH.
+ *
+ * Two models are evaluated and the larger value is returned:
+ *
+ * 1. **Alkalinity neutralization** – for water with meaningful
+ *    bicarbonate buffering. A pH-dependent fraction of the source
+ *    alkalinity is neutralized using the mEq formula.
+ *
+ * 2. **Grain-buffer override** – for RO / distilled / very-low-alk
+ *    water where the grain's natural buffering from ~5.7 down to the
+ *    target pH is the dominant factor.
+ *
+ * @param sourceAlkalinity  - Source water alkalinity in ppm as CaCO3
+ * @param targetPh          - Desired mash pH (e.g. 5.3)
  * @param strikeWaterLiters - Volume of mash/strike water in liters
  * @returns mL of 88 % lactic acid, rounded to one decimal place
  */
@@ -116,10 +134,19 @@ export function calculateAcid(
   targetPh: number,
   strikeWaterLiters: number,
 ): number {
+  // Model 1: alkalinity neutralization (dominates for normal tap water)
   const fraction = neutralizationFraction(targetPh);
   const alkToNeutralize = sourceAlkalinity * fraction;
-  const mEq = (alkToNeutralize / MEQ_ALK_PER_LITER) * strikeWaterLiters;
-  return round(mEq * MEQ_ML_88_LACTIC, 1);
+  const alkMeq = (alkToNeutralize / MEQ_ALK_PER_LITER) * strikeWaterLiters;
+  const alkAcid = alkMeq * MEQ_ML_88_LACTIC;
+
+  // Model 2: grain-buffer acid (dominates for RO/low-alk water)
+  const phDrop = Math.max(0, GRAIN_DI_MASH_PH - targetPh);
+  const strikeGal = strikeWaterLiters / GAL_TO_LITERS;
+  const grainMeq = phDrop * GRAIN_BUFFER_MEQ_PER_PH_PER_GAL * strikeGal;
+  const grainAcid = grainMeq * MEQ_ML_88_LACTIC;
+
+  return round(Math.max(alkAcid, grainAcid), 1);
 }
 
 // ── Main calculator ──────────────────────────────────────────────────
@@ -128,6 +155,7 @@ export function calculate(
   source: WaterProfile,
   target: StyleTarget,
   batchGallons: number,
+  strikeWaterGal: number,
 ): CalculationResult {
   // Deltas needed (ppm) – clamp to zero (we only add, not remove)
   const deltaCa = Math.max(0, target.ca - source.ca);
@@ -154,7 +182,7 @@ export function calculate(
   const calciumChloride = round(cacl2PerGal * batchGallons, 1);
 
   // Step 4: Lactic acid — mEq formula on strike water only
-  const strikeWaterLiters = batchGallons * STRIKE_WATER_RATIO * GAL_TO_LITERS;
+  const strikeWaterLiters = strikeWaterGal * GAL_TO_LITERS;
   const lacticAcid = calculateAcid(
     source.alkalinity,
     target.ph_target,

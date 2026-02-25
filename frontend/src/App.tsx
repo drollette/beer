@@ -6,7 +6,8 @@ import {
   type CalculationResult,
 } from "./calculator";
 
-// Default source water: Meridian/83709 well baseline
+// ── Constants ────────────────────────────────────────────────────────
+
 const DEFAULT_SOURCE: WaterProfile = {
   ca: 37.1,
   mg: 7.0,
@@ -17,7 +18,20 @@ const DEFAULT_SOURCE: WaterProfile = {
   ph: 7.9,
 };
 
-// Embedded style targets (fallback if API is unavailable)
+const RO_SOURCE: WaterProfile = {
+  ca: 0,
+  mg: 0,
+  na: 0,
+  cl: 0,
+  so4: 0,
+  alkalinity: 0,
+  ph: 7.0,
+};
+
+const STORAGE_KEY = "brewday-source-water";
+
+const DEFAULT_STRIKE_RATIO = 0.75;
+
 const FALLBACK_STYLES: StyleTarget[] = [
   { name: "Hefeweizen", ca: 50, mg: 10, na: 10, cl: 60, so4: 30, ph_target: 5.4 },
   { name: "IPA", ca: 100, mg: 15, na: 25, cl: 50, so4: 275, ph_target: 5.3 },
@@ -28,30 +42,70 @@ const FALLBACK_STYLES: StyleTarget[] = [
   { name: "Stout", ca: 100, mg: 15, na: 30, cl: 125, so4: 50, ph_target: 5.4 },
 ];
 
+// ── Helpers ──────────────────────────────────────────────────────────
+
+function profilesEqual(a: WaterProfile, b: WaterProfile): boolean {
+  return (
+    a.ca === b.ca &&
+    a.mg === b.mg &&
+    a.na === b.na &&
+    a.cl === b.cl &&
+    a.so4 === b.so4 &&
+    a.alkalinity === b.alkalinity &&
+    a.ph === b.ph
+  );
+}
+
+function profileLabel(source: WaterProfile): string {
+  if (profilesEqual(source, DEFAULT_SOURCE)) return "Meridian, ID / 83709 Well";
+  if (profilesEqual(source, RO_SOURCE)) return "RO Water";
+  return "Custom Profile";
+}
+
+function loadSource(): WaterProfile {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch {
+    /* corrupted data — fall through */
+  }
+  return DEFAULT_SOURCE;
+}
+
+// ── App ──────────────────────────────────────────────────────────────
+
 export default function App() {
-  const [source, setSource] = useState<WaterProfile>(DEFAULT_SOURCE);
+  const [source, setSource] = useState<WaterProfile>(loadSource);
   const [styles, setStyles] = useState<StyleTarget[]>(FALLBACK_STYLES);
   const [selectedStyle, setSelectedStyle] = useState<string>("IPA");
   const [batchSize, setBatchSize] = useState(8);
+  const [strikeWater, setStrikeWater] = useState(
+    parseFloat((8 * DEFAULT_STRIKE_RATIO).toFixed(1)),
+  );
 
-  // Try to load from API on mount
+  // Fetch API data on mount.
+  // Declared BEFORE the save effect so the localStorage check runs
+  // before the save effect writes the initial state on first render.
   useEffect(() => {
-    fetch("/api/baseline")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data && !data.error) {
-          setSource({
-            ca: data.ca,
-            mg: data.mg,
-            na: data.na,
-            cl: data.cl,
-            so4: data.so4,
-            alkalinity: data.alkalinity,
-            ph: data.ph,
-          });
-        }
-      })
-      .catch(() => {});
+    const hasSaved = localStorage.getItem(STORAGE_KEY) !== null;
+    if (!hasSaved) {
+      fetch("/api/baseline")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data && !data.error) {
+            setSource({
+              ca: data.ca,
+              mg: data.mg,
+              na: data.na,
+              cl: data.cl,
+              so4: data.so4,
+              alkalinity: data.alkalinity,
+              ph: data.ph,
+            });
+          }
+        })
+        .catch(() => {});
+    }
 
     fetch("/api/styles")
       .then((r) => (r.ok ? r.json() : null))
@@ -63,19 +117,40 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  // Persist source water to localStorage on every change.
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(source));
+    } catch {
+      /* quota exceeded — ignore */
+    }
+  }, [source]);
+
+  const handleBatchChange = (newBatch: number) => {
+    // Scale strike water proportionally when batch size changes
+    if (batchSize > 0) {
+      setStrikeWater(
+        parseFloat(((newBatch * strikeWater) / batchSize).toFixed(1)),
+      );
+    }
+    setBatchSize(newBatch);
+  };
+
   const target = styles.find((s) => s.name === selectedStyle) ?? styles[0];
 
   const result: CalculationResult = useMemo(
-    () => calculate(source, target, batchSize),
-    [source, target, batchSize]
+    () => calculate(source, target, batchSize, strikeWater),
+    [source, target, batchSize, strikeWater],
   );
+
+  const sourceLabel = profileLabel(source);
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6 font-mono">
       {/* Header */}
       <header className="text-center mb-8">
         <h1 className="text-2xl font-bold text-amber-400">Brew Day Water Helper</h1>
-        <p className="text-sm text-gray-500 mt-1">Meridian, ID / 83709 Well</p>
+        <p className="text-sm text-gray-500 mt-1">{sourceLabel}</p>
       </header>
 
       {/* Style + Batch */}
@@ -102,7 +177,7 @@ export default function App() {
             max={100}
             step={0.5}
             value={batchSize}
-            onChange={(e) => setBatchSize(parseFloat(e.target.value) || 1)}
+            onChange={(e) => handleBatchChange(parseFloat(e.target.value) || 1)}
             className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:border-amber-500 focus:outline-none"
           />
         </div>
@@ -117,9 +192,22 @@ export default function App() {
 
       {/* Acid Addition */}
       <Section title="Acidification">
+        <div className="flex items-center gap-2 mb-3">
+          <label className="text-xs text-gray-400 shrink-0">Strike water</label>
+          <input
+            type="number"
+            min={0.5}
+            max={batchSize}
+            step={0.5}
+            value={strikeWater}
+            onChange={(e) => setStrikeWater(parseFloat(e.target.value) || 1)}
+            className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:border-amber-500 focus:outline-none"
+          />
+          <span className="text-xs text-gray-500">gal</span>
+        </div>
         <AdditionRow label="88% Lactic Acid" value={result.additions.lacticAcid} unit="mL" />
         <p className="text-xs text-gray-500 mt-2">
-          Target mash pH: {target.ph_target} &middot; Strike water: {(batchSize * 0.75).toFixed(1)} gal
+          Target mash pH: {target.ph_target}
         </p>
       </Section>
 
@@ -158,12 +246,20 @@ export default function App() {
           <SourceInput label="Alkalinity" value={source.alkalinity} onChange={(v) => setSource({ ...source, alkalinity: v })} />
           <SourceInput label="pH" value={source.ph} onChange={(v) => setSource({ ...source, ph: v })} />
         </div>
-        <button
-          onClick={() => setSource(DEFAULT_SOURCE)}
-          className="mt-4 w-full py-2 text-xs text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded hover:border-amber-400/50 transition-colors"
-        >
-          Reset to Meridian defaults
-        </button>
+        <div className="mt-4 flex gap-3">
+          <button
+            onClick={() => setSource(DEFAULT_SOURCE)}
+            className="flex-1 py-2 text-xs text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded hover:border-amber-400/50 transition-colors"
+          >
+            Reset to Meridian defaults
+          </button>
+          <button
+            onClick={() => setSource(RO_SOURCE)}
+            className="flex-1 py-2 text-xs text-blue-400 hover:text-blue-300 border border-blue-400/30 rounded hover:border-blue-300/50 transition-colors"
+          >
+            Use RO Water
+          </button>
+        </div>
       </Section>
 
       <footer className="mt-8 text-center text-xs text-gray-600">
@@ -172,6 +268,8 @@ export default function App() {
     </div>
   );
 }
+
+// ── Sub-components ───────────────────────────────────────────────────
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -187,7 +285,7 @@ function AdditionRow({ label, value, unit }: { label: string; value: number; uni
     <div className="flex justify-between items-center py-1.5 border-b border-gray-800 last:border-0">
       <span className="text-sm text-gray-300">{label}</span>
       <span className="text-sm font-semibold text-gray-100">
-        {value} <span className="text-gray-500 font-normal">{unit}</span>
+        {value.toFixed(1)} <span className="text-gray-500 font-normal">{unit}</span>
       </span>
     </div>
   );
