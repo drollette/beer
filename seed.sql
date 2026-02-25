@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS beer_styles (
 
 -- Seed default water baseline (Meridian/83709 well)
 INSERT INTO water_baseline (date, ca, mg, na, cl, so4, alkalinity, ph)
-VALUES ('2025-01-01', 37.1, 7.0, 42.3, 14.2, 56.2, 151.5, 7.9);
+VALUES ('2025-01-01', 37.1, 7.0, 43.7, 14.2, 56.2, 151.5, 7.9);
 
 -- Seed beer styles with target water profiles
 -- Values based on well-known brewing water targets for each style

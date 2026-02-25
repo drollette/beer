@@ -10,7 +10,7 @@ import {
 const DEFAULT_SOURCE: WaterProfile = {
   ca: 37.1,
   mg: 7.0,
-  na: 42.3,
+  na: 43.7,
   cl: 14.2,
   so4: 56.2,
   alkalinity: 151.5,

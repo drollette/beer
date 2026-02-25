@@ -1,5 +1,23 @@
 {
   "name": "brew-day-water-helper",
+  "version": "0.0.0",
   "private": true,
-  "workspaces": ["frontend", "scraper"]
+  "workspaces": ["frontend", "scraper"],
+  "devDependencies": {
+    "semantic-release": "^24.0.0",
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0"
+  },
+  "release": {
+    "branches": ["main"],
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/changelog",
+      "@semantic-release/github"
+    ]
+  },
+  "commitlint": {
+    "extends": ["@commitlint/config-conventional"]
+  }
 }

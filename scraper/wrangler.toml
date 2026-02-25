@@ -5,7 +5,28 @@ main = "src/index.ts"
 [triggers]
 crons = ["0 6 * * 1"]
 
-[[d1_databases]]
+# ── Staging ──────────────────────────────────────────────────────────
+[env.staging]
+name = "brew-day-scraper-staging"
+
+[env.staging.triggers]
+crons = ["0 6 * * 1"]
+
+[[env.staging.d1_databases]]
 binding = "DB"
-database_name = "brew-day-db"
-database_id = "brew-day-db"
+database_name = "beer-db-dev"
+database_id = "REPLACE_WITH_STAGING_DB_ID"
+migrations_dir = "../migrations"
+
+# ── Production ───────────────────────────────────────────────────────
+[env.production]
+name = "brew-day-scraper"
+
+[env.production.triggers]
+crons = ["0 6 * * 1"]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "beer-db-prod"
+database_id = "REPLACE_WITH_PROD_DB_ID"
+migrations_dir = "../migrations"

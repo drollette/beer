@@ -1,11 +1,26 @@
 name = "brew-day-water-helper"
 compatibility_date = "2024-12-01"
 main = "src/worker.ts"
-
-# Serve the built React SPA from assets
 assets = { directory = "./dist" }
 
-[[d1_databases]]
+# ── Staging ──────────────────────────────────────────────────────────
+[env.staging]
+name = "brew-day-water-helper-staging"
+routes = [{ pattern = "beer-dev.w7hak.com", custom_domain = true }]
+
+[[env.staging.d1_databases]]
 binding = "DB"
-database_name = "brew-day-db"
-database_id = "brew-day-db"
+database_name = "beer-db-dev"
+database_id = "REPLACE_WITH_STAGING_DB_ID"
+migrations_dir = "../migrations"
+
+# ── Production ───────────────────────────────────────────────────────
+[env.production]
+name = "brew-day-water-helper"
+routes = [{ pattern = "beer.w7hak.com", custom_domain = true }]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "beer-db-prod"
+database_id = "REPLACE_WITH_PROD_DB_ID"
+migrations_dir = "../migrations"

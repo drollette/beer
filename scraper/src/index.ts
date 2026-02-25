@@ -3,11 +3,13 @@
  *
  * Cron-triggered worker that fetches water baseline data from a static JSON URL
  * (e.g., a GitHub Gist) and upserts it into the D1 database.
+ *
+ * Includes sanity-check validation against reasonable Boise-area groundwater
+ * ranges to prevent data corruption from bad upstream data.
  */
 
 interface Env {
   DB: D1Database;
-  /** URL to fetch the water baseline JSON from. Set in wrangler.toml or dashboard. */
   BASELINE_URL?: string;
 }
 
@@ -21,6 +23,17 @@ interface BaselinePayload {
   alkalinity: number;
   ph: number;
 }
+
+// Reasonable ranges for Boise / Treasure Valley groundwater (ppm)
+const SANITY_RANGES: Record<string, { min: number; max: number }> = {
+  ca:         { min: 10,  max: 100 },
+  mg:         { min: 1,   max: 50 },
+  na:         { min: 5,   max: 150 },
+  cl:         { min: 1,   max: 100 },
+  so4:        { min: 5,   max: 200 },
+  alkalinity: { min: 30,  max: 400 },
+  ph:         { min: 6.0, max: 9.0 },
+};
 
 function isValidPayload(data: unknown): data is BaselinePayload {
   if (typeof data !== "object" || data === null) return false;
@@ -37,6 +50,19 @@ function isValidPayload(data: unknown): data is BaselinePayload {
   );
 }
 
+function sanityCheck(data: BaselinePayload): string[] {
+  const errors: string[] = [];
+  for (const [key, range] of Object.entries(SANITY_RANGES)) {
+    const value = data[key as keyof BaselinePayload] as number;
+    if (value < range.min || value > range.max) {
+      errors.push(
+        `${key}: ${value} is outside expected range [${range.min}–${range.max}]`
+      );
+    }
+  }
+  return errors;
+}
+
 export default {
   async scheduled(
     _event: ScheduledEvent,
@@ -48,12 +74,10 @@ export default {
       console.log("BASELINE_URL not configured – skipping scrape.");
       return;
     }
-
     ctx.waitUntil(scrape(url, env.DB));
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {
-    // Allow manual trigger via GET for testing
     const url = new URL(request.url);
     if (url.pathname === "/trigger" && request.method === "GET") {
       const baselineUrl = env.BASELINE_URL;
@@ -72,7 +96,7 @@ async function scrape(url: string, db: D1Database): Promise<void> {
 
   const resp = await fetch(url);
   if (!resp.ok) {
-    console.error(`Failed to fetch baseline: ${resp.status} ${resp.statusText}`);
+    console.error(`Fetch failed: ${resp.status} ${resp.statusText}`);
     return;
   }
 
@@ -83,12 +107,28 @@ async function scrape(url: string, db: D1Database): Promise<void> {
     return;
   }
 
+  // Sanity check: reject values outside Boise groundwater norms
+  const violations = sanityCheck(data);
+  if (violations.length > 0) {
+    console.error("Sanity check failed – skipping insert:", violations);
+    return;
+  }
+
   await db
     .prepare(
       `INSERT INTO water_baseline (date, ca, mg, na, cl, so4, alkalinity, ph)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(data.date, data.ca, data.mg, data.na, data.cl, data.so4, data.alkalinity, data.ph)
+    .bind(
+      data.date,
+      data.ca,
+      data.mg,
+      data.na,
+      data.cl,
+      data.so4,
+      data.alkalinity,
+      data.ph
+    )
     .run();
 
   console.log(`Baseline for ${data.date} inserted successfully.`);
