@@ -1,0 +1,11 @@
+name = "brew-day-scraper"
+compatibility_date = "2024-12-01"
+main = "src/index.ts"
+
+[triggers]
+crons = ["0 6 * * 1"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "brew-day-db"
+database_id = "brew-day-db"

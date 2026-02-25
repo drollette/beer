@@ -1,0 +1,5 @@
+{
+  "name": "brew-day-water-helper",
+  "private": true,
+  "workspaces": ["frontend", "scraper"]
+}
