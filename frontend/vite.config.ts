@@ -9,7 +9,7 @@ const rootPkg = JSON.parse(
 
 export default defineConfig({
   define: {
-    __APP_VERSION__: JSON.stringify(rootPkg.version),
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(rootPkg.version),
   },
   plugins: [react()],
   server: {

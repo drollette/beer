@@ -6,8 +6,6 @@ import {
   type CalculationResult,
 } from "./calculator";
 
-declare const __APP_VERSION__: string;
-
 // Default source water: Meridian/83709 well baseline
 const DEFAULT_SOURCE: WaterProfile = {
   ca: 37.1,
@@ -121,7 +119,7 @@ export default function App() {
       <Section title="Acidification">
         <AdditionRow label="88% Lactic Acid" value={result.additions.lacticAcid} unit="mL" />
         <p className="text-xs text-gray-500 mt-2">
-          Target mash pH: {target.ph_target} (source: {source.ph})
+          Target mash pH: {target.ph_target} &middot; Strike water: {(batchSize * 0.75).toFixed(1)} gal
         </p>
       </Section>
 
@@ -151,7 +149,7 @@ export default function App() {
 
       {/* Source Editable */}
       <Section title="Source Water (editable)">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-row flex-wrap gap-4">
           <SourceInput label="Ca" value={source.ca} onChange={(v) => setSource({ ...source, ca: v })} />
           <SourceInput label="Mg" value={source.mg} onChange={(v) => setSource({ ...source, mg: v })} />
           <SourceInput label="Na" value={source.na} onChange={(v) => setSource({ ...source, na: v })} />
@@ -162,14 +160,14 @@ export default function App() {
         </div>
         <button
           onClick={() => setSource(DEFAULT_SOURCE)}
-          className="mt-3 text-xs text-amber-500 hover:text-amber-400"
+          className="mt-4 w-full py-2 text-xs text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded hover:border-amber-400/50 transition-colors"
         >
           Reset to Meridian defaults
         </button>
       </Section>
 
       <footer className="mt-8 text-center text-xs text-gray-600">
-        beer.w7hak.com &middot; v{__APP_VERSION__}
+        beer.w7hak.com &middot; v{import.meta.env.VITE_APP_VERSION}
       </footer>
     </div>
   );
@@ -230,14 +228,14 @@ function SourceInput({
   onChange: (v: number) => void;
 }) {
   return (
-    <div className="flex items-center gap-2">
-      <label className="text-xs text-gray-500 w-16">{label}</label>
+    <div className="flex items-center gap-2 min-w-[8rem] flex-1">
+      <label className="text-xs text-gray-500 w-20 shrink-0">{label}</label>
       <input
         type="number"
         step="0.1"
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-        className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:border-amber-500 focus:outline-none"
+        className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:border-amber-500 focus:outline-none"
       />
     </div>
   );
