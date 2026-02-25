@@ -43,7 +43,7 @@ export interface SaltAdditions {
   gypsum: number;
   /** grams of Epsom Salt (MgSO4·7H2O) */
   epsom: number;
-  /** ml of 88% Lactic Acid */
+  /** mL of 88% Lactic Acid */
   lacticAcid: number;
 }
 
@@ -61,7 +61,7 @@ export interface CalculationResult {
   adjusted: AdjustedProfile;
 }
 
-// Salt contribution factors in ppm per gram per gallon
+// ── Salt contribution factors (ppm per gram per gallon) ──────────────
 const CACL2_CA = 72;
 const CACL2_CL = 127;
 const GYPSUM_CA = 61.5;
@@ -69,37 +69,72 @@ const GYPSUM_SO4 = 147.4;
 const EPSOM_MG = 26.1;
 const EPSOM_SO4 = 103;
 
-/**
- * 88% Lactic Acid: ~0.684 mL neutralizes 50 ppm alkalinity (as CaCO3) per gallon.
- * Rearranged: each mL of 88% lactic acid reduces alkalinity by ~73 ppm per gallon.
- */
-const LACTIC_88_ALK_REDUCTION_PER_ML_PER_GAL = 73;
+// ── Lactic acid constants ────────────────────────────────────────────
+const GAL_TO_LITERS = 3.78541;
+
+/** Default fraction of total batch used as mash/strike water. */
+const STRIKE_WATER_RATIO = 0.75;
 
 /**
- * Kolbach Residual Alkalinity divisors.
- * RA = Alkalinity(as CaCO3) - Ca/1.4 - Mg/1.7
- *
- * Calcium and magnesium react with mash phosphates, effectively lowering
- * mash pH independent of acid additions. RA represents the remaining
- * alkalinity that the brewer must neutralize with acid. At RA ≈ 0 a
- * pale-malt mash lands near pH 5.4.
+ * 88% Lactic Acid: 1 milliequivalent (mEq) ≈ 0.09 mL.
+ * 1 mEq neutralizes 50 mg/L (ppm) CaCO3 alkalinity per liter of water.
  */
-const KOLBACH_CA_DIVISOR = 1.4;
-const KOLBACH_MG_DIVISOR = 1.7;
+const MEQ_ML_88_LACTIC = 0.09;
+const MEQ_ALK_PER_LITER = 50;
+
+/**
+ * Alkalinity neutralization fraction mapped from target mash pH.
+ *
+ * Light-grain styles targeting pH 5.3 need ~80-85% of source alkalinity
+ * neutralized; darker-grain styles targeting pH 5.4 need ~50-60%.
+ * Values are linearly interpolated between these reference points and
+ * clamped to [NEUT_FRAC_HIGH, NEUT_FRAC_LOW].
+ */
+const NEUT_PH_LOW = 5.3;
+const NEUT_PH_HIGH = 5.4;
+const NEUT_FRAC_AT_LOW = 0.825; // 82.5 % at pH 5.3
+const NEUT_FRAC_AT_HIGH = 0.55; // 55 %   at pH 5.4
+
+function neutralizationFraction(targetPh: number): number {
+  if (targetPh <= NEUT_PH_LOW) return NEUT_FRAC_AT_LOW;
+  if (targetPh >= NEUT_PH_HIGH) return NEUT_FRAC_AT_HIGH;
+  const t = (targetPh - NEUT_PH_LOW) / (NEUT_PH_HIGH - NEUT_PH_LOW);
+  return NEUT_FRAC_AT_LOW + t * (NEUT_FRAC_AT_HIGH - NEUT_FRAC_AT_LOW);
+}
+
+/**
+ * Calculate mL of 88 % lactic acid needed to neutralize the required
+ * fraction of source alkalinity in the strike/mash water.
+ *
+ * @param sourceAlkalinity - Source water alkalinity in ppm as CaCO3
+ * @param targetPh         - Desired mash pH (e.g. 5.3)
+ * @param strikeWaterLiters - Volume of mash/strike water in liters
+ * @returns mL of 88 % lactic acid, rounded to one decimal place
+ */
+export function calculateAcid(
+  sourceAlkalinity: number,
+  targetPh: number,
+  strikeWaterLiters: number,
+): number {
+  const fraction = neutralizationFraction(targetPh);
+  const alkToNeutralize = sourceAlkalinity * fraction;
+  const mEq = (alkToNeutralize / MEQ_ALK_PER_LITER) * strikeWaterLiters;
+  return round(mEq * MEQ_ML_88_LACTIC, 1);
+}
+
+// ── Main calculator ──────────────────────────────────────────────────
 
 export function calculate(
   source: WaterProfile,
   target: StyleTarget,
-  batchGallons: number
+  batchGallons: number,
 ): CalculationResult {
   // Deltas needed (ppm) – clamp to zero (we only add, not remove)
   const deltaCa = Math.max(0, target.ca - source.ca);
   const deltaMg = Math.max(0, target.mg - source.mg);
-  const deltaCl = Math.max(0, target.cl - source.cl);
   const deltaSo4 = Math.max(0, target.so4 - source.so4);
 
   // Step 1: Use Epsom Salt to hit Mg target
-  // Each g/gal contributes 26.1 ppm Mg and 103 ppm SO4
   const epsomPerGal = deltaMg / EPSOM_MG;
   const so4FromEpsom = epsomPerGal * EPSOM_SO4;
 
@@ -113,43 +148,24 @@ export function calculate(
   const cacl2PerGal = remainingCa / CACL2_CA;
   const clFromCaCl2 = cacl2PerGal * CACL2_CL;
 
-  // If Cl target isn't met by CaCl2 alone, we could add more, but
-  // to keep it simple we only use CaCl2 for Ca. The Cl contribution
-  // is a bonus. If Cl is already exceeded we don't reduce CaCl2
-  // (Ca takes priority).
-
   // Total grams for the full batch
   const gypsum = round(gypsumPerGal * batchGallons, 1);
   const epsom = round(epsomPerGal * batchGallons, 1);
   const calciumChloride = round(cacl2PerGal * batchGallons, 1);
 
-  // Step 4: Lactic acid via Residual Alkalinity (Kolbach formula)
-  //
-  // RA = Alkalinity - Ca/1.4 - Mg/1.7
-  //
-  // Ca and Mg from salt additions react with mash phosphates, naturally
-  // lowering mash pH. RA captures how much buffering capacity remains
-  // after that effect. At RA ≈ 0 a pale-malt mash lands near pH 5.4;
-  // we neutralize any positive RA with lactic acid.
-  const adjustedCa = source.ca + caFromGypsum + cacl2PerGal * CACL2_CA;
-  const adjustedMg = source.mg + epsomPerGal * EPSOM_MG;
+  // Step 4: Lactic acid — mEq formula on strike water only
+  const strikeWaterLiters = batchGallons * STRIKE_WATER_RATIO * GAL_TO_LITERS;
+  const lacticAcid = calculateAcid(
+    source.alkalinity,
+    target.ph_target,
+    strikeWaterLiters,
+  );
 
-  const residualAlk =
-    source.alkalinity -
-    adjustedCa / KOLBACH_CA_DIVISOR -
-    adjustedMg / KOLBACH_MG_DIVISOR;
-
-  const alkToNeutralize = Math.max(0, residualAlk);
-
-  // mL of 88% lactic acid for the full batch
-  const lacticPerGal = alkToNeutralize / LACTIC_88_ALK_REDUCTION_PER_ML_PER_GAL;
-  const lacticAcid = round(lacticPerGal * batchGallons, 1);
-
-  // Compute adjusted profile
+  // Adjusted ion profile (based on full batch volume)
   const adjusted: AdjustedProfile = {
-    ca: round(adjustedCa, 1),
-    mg: round(adjustedMg, 1),
-    na: source.na, // unchanged by these salts
+    ca: round(source.ca + caFromGypsum + cacl2PerGal * CACL2_CA, 1),
+    mg: round(source.mg + epsomPerGal * EPSOM_MG, 1),
+    na: source.na,
     cl: round(source.cl + clFromCaCl2, 1),
     so4: round(source.so4 + so4FromEpsom + gypsumPerGal * GYPSUM_SO4, 1),
     ph: round(target.ph_target, 1),
