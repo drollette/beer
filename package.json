@@ -4,9 +4,10 @@
   "private": true,
   "workspaces": ["frontend", "scraper"],
   "devDependencies": {
-    "semantic-release": "^24.0.0",
     "@commitlint/cli": "^19.0.0",
-    "@commitlint/config-conventional": "^19.0.0"
+    "@commitlint/config-conventional": "^19.0.0",
+    "@semantic-release/changelog": "^6.0.0",
+    "semantic-release": "^24.0.0"
   },
   "release": {
     "branches": ["main"],
