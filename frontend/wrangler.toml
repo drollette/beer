@@ -11,7 +11,7 @@ routes = [{ pattern = "beer-dev.w7hak.com", custom_domain = true }]
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "beer-db-dev"
-database_id = "REPLACE_WITH_STAGING_DB_ID"
+database_id = "0dd11726-22be-4bf0-98c5-a0451a3de268"
 migrations_dir = "../migrations"
 
 # ── Production ───────────────────────────────────────────────────────
@@ -22,5 +22,5 @@ routes = [{ pattern = "beer.w7hak.com", custom_domain = true }]
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "beer-db-prod"
-database_id = "REPLACE_WITH_PROD_DB_ID"
+database_id = "8466a0ec-7b87-4a39-a7a8-38d01202f85e"
 migrations_dir = "../migrations"
