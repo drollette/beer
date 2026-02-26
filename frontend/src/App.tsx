@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   calculate,
+  SPARGE_TARGET_PH,
   type WaterProfile,
   type StyleTarget,
-  type CalculationResult,
+  type ProcessResult,
 } from "./calculator";
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -29,8 +30,6 @@ const RO_SOURCE: WaterProfile = {
 };
 
 const STORAGE_KEY = "brewday-source-water";
-
-const DEFAULT_STRIKE_RATIO = 0.75;
 
 const FALLBACK_STYLES: StyleTarget[] = [
   { name: "Hefeweizen", ca: 50, mg: 10, na: 10, cl: 60, so4: 30, ph_target: 5.4 },
@@ -72,20 +71,61 @@ function loadSource(): WaterProfile {
   return DEFAULT_SOURCE;
 }
 
+/** Parse a string to a non-negative number, or 0 if invalid. */
+function toNum(s: string): number {
+  const n = parseFloat(s);
+  return isNaN(n) || n < 0 ? 0 : n;
+}
+
 // ── App ──────────────────────────────────────────────────────────────
 
 export default function App() {
   const [source, setSource] = useState<WaterProfile>(loadSource);
   const [styles, setStyles] = useState<StyleTarget[]>(FALLBACK_STYLES);
-  const [selectedStyle, setSelectedStyle] = useState<string>("IPA");
-  const [batchSize, setBatchSize] = useState(8);
-  const [strikeWater, setStrikeWater] = useState(
-    parseFloat((8 * DEFAULT_STRIKE_RATIO).toFixed(1)),
-  );
+  const [selectedStyle, setSelectedStyle] = useState("IPA");
 
-  // Fetch API data on mount.
-  // Declared BEFORE the save effect so the localStorage check runs
-  // before the save effect writes the initial state on first render.
+  // String-backed volume/weight inputs so the user can freely
+  // clear and retype values without the browser clamping to min.
+  const [strikeStr, setStrikeStr] = useState("6.0");
+  const [spargeStr, setSpargeStr] = useState("2.0");
+  const [grainStr, setGrainStr] = useState("12");
+  const [targetVolStr, setTargetVolStr] = useState("8.0");
+
+  const strike = toNum(strikeStr);
+  const spargeVal = toNum(spargeStr);
+  const grainLbs = toNum(grainStr);
+  const targetVol = toNum(targetVolStr);
+
+  // ── Volume auto-linking ────────────────────────────────────────
+  // Strike or Target Volume changes → recalculate Sparge
+  // Sparge changes → recalculate Target Volume
+
+  const handleTargetVolChange = (val: string) => {
+    setTargetVolStr(val);
+    const tv = parseFloat(val);
+    if (!isNaN(tv) && tv >= 0) {
+      setSpargeStr(Math.max(0, tv - strike).toFixed(1));
+    }
+  };
+
+  const handleStrikeChange = (val: string) => {
+    setStrikeStr(val);
+    const s = parseFloat(val);
+    if (!isNaN(s) && s >= 0) {
+      setSpargeStr(Math.max(0, targetVol - s).toFixed(1));
+    }
+  };
+
+  const handleSpargeChange = (val: string) => {
+    setSpargeStr(val);
+    const sp = parseFloat(val);
+    if (!isNaN(sp) && sp >= 0) {
+      setTargetVolStr((strike + sp).toFixed(1));
+    }
+  };
+
+  // ── API + localStorage ─────────────────────────────────────────
+
   useEffect(() => {
     const hasSaved = localStorage.getItem(STORAGE_KEY) !== null;
     if (!hasSaved) {
@@ -117,7 +157,6 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  // Persist source water to localStorage on every change.
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(source));
@@ -126,24 +165,18 @@ export default function App() {
     }
   }, [source]);
 
-  const handleBatchChange = (newBatch: number) => {
-    // Scale strike water proportionally when batch size changes
-    if (batchSize > 0) {
-      setStrikeWater(
-        parseFloat(((newBatch * strikeWater) / batchSize).toFixed(1)),
-      );
-    }
-    setBatchSize(newBatch);
-  };
+  // ── Calculation ────────────────────────────────────────────────
 
   const target = styles.find((s) => s.name === selectedStyle) ?? styles[0];
 
-  const result: CalculationResult = useMemo(
-    () => calculate(source, target, batchSize, strikeWater),
-    [source, target, batchSize, strikeWater],
+  const result: ProcessResult = useMemo(
+    () => calculate(source, target, strike, spargeVal, grainLbs),
+    [source, target, strike, spargeVal, grainLbs],
   );
 
   const sourceLabel = profileLabel(source);
+
+  // ── Render ─────────────────────────────────────────────────────
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6 font-mono">
@@ -153,66 +186,78 @@ export default function App() {
         <p className="text-sm text-gray-500 mt-1">{sourceLabel}</p>
       </header>
 
-      {/* Style + Batch */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">Beer Style</label>
-          <select
-            value={selectedStyle}
-            onChange={(e) => setSelectedStyle(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:border-amber-500 focus:outline-none"
-          >
-            {styles.map((s) => (
-              <option key={s.name} value={s.name}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-gray-400 mb-1">Batch (gal)</label>
-          <input
-            type="number"
-            min={1}
-            max={100}
-            step={0.5}
-            value={batchSize}
-            onChange={(e) => handleBatchChange(parseFloat(e.target.value) || 1)}
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:border-amber-500 focus:outline-none"
-          />
-        </div>
+      {/* Style selector */}
+      <div className="mb-6">
+        <label className="block text-xs text-gray-400 mb-1">Beer Style</label>
+        <select
+          value={selectedStyle}
+          onChange={(e) => setSelectedStyle(e.target.value)}
+          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:border-amber-500 focus:outline-none"
+        >
+          {styles.map((s) => (
+            <option key={s.name} value={s.name}>
+              {s.name}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* Salt Additions */}
-      <Section title="Salt Additions">
-        <AdditionRow label="Gypsum (CaSO4)" value={result.additions.gypsum} unit="g" />
-        <AdditionRow label="Calcium Chloride" value={result.additions.calciumChloride} unit="g" />
-        <AdditionRow label="Epsom Salt (MgSO4)" value={result.additions.epsom} unit="g" />
+      {/* ── Mash Water ──────────────────────────────────────────── */}
+      <Section title="Mash Water">
+        <div className="flex flex-wrap gap-4 mb-4">
+          <VolumeInput
+            label="Strike Vol"
+            unit="gal"
+            value={strikeStr}
+            onChange={handleStrikeChange}
+          />
+          <VolumeInput
+            label="Grain Weight"
+            unit="lbs"
+            value={grainStr}
+            onChange={setGrainStr}
+          />
+        </div>
+
+        <h3 className="text-xs text-gray-500 mb-2">Salt additions (into mash)</h3>
+        <AdditionRow label="Gypsum (CaSO4)" value={result.mash.gypsum} unit="g" />
+        <AdditionRow label="Calcium Chloride" value={result.mash.calciumChloride} unit="g" />
+        <AdditionRow label="Epsom Salt (MgSO4)" value={result.mash.epsom} unit="g" />
+
+        <div className="mt-3 pt-3 border-t border-gray-800">
+          <AdditionRow label="88% Lactic Acid" value={result.mash.lacticAcid} unit="mL" />
+          <p className="text-xs text-gray-500 mt-1">Target mash pH: {target.ph_target}</p>
+        </div>
       </Section>
 
-      {/* Acid Addition */}
-      <Section title="Acidification">
-        <div className="flex items-center gap-2 mb-3">
-          <label className="text-xs text-gray-400 shrink-0">Strike water</label>
-          <input
-            type="number"
-            min={0.5}
-            max={batchSize}
-            step={0.5}
-            value={strikeWater}
-            onChange={(e) => setStrikeWater(parseFloat(e.target.value) || 1)}
-            className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:border-amber-500 focus:outline-none"
+      {/* ── Sparge Water ────────────────────────────────────────── */}
+      <Section title="Sparge Water">
+        <div className="mb-4">
+          <VolumeInput
+            label="Sparge Vol"
+            unit="gal"
+            value={spargeStr}
+            onChange={handleSpargeChange}
           />
-          <span className="text-xs text-gray-500">gal</span>
         </div>
-        <AdditionRow label="88% Lactic Acid" value={result.additions.lacticAcid} unit="mL" />
-        <p className="text-xs text-gray-500 mt-2">
-          Target mash pH: {target.ph_target}
+
+        <AdditionRow label="88% Lactic Acid" value={result.sparge.lacticAcid} unit="mL" />
+        <p className="text-xs text-gray-500 mt-1">
+          Target sparge pH: {SPARGE_TARGET_PH}
         </p>
       </Section>
 
-      {/* Water Profile Comparison */}
-      <Section title="Water Profile">
+      {/* ── Final Summary ───────────────────────────────────────── */}
+      <Section title="Final Summary">
+        <div className="mb-4">
+          <VolumeInput
+            label="Target Volume"
+            unit="gal"
+            value={targetVolStr}
+            onChange={handleTargetVolChange}
+          />
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
@@ -235,7 +280,7 @@ export default function App() {
         </div>
       </Section>
 
-      {/* Source Editable */}
+      {/* ── Source Water ─────────────────────────────────────────── */}
       <Section title="Source Water (editable)">
         <div className="flex flex-row flex-wrap gap-4">
           <SourceInput label="Ca" value={source.ca} onChange={(v) => setSource({ ...source, ca: v })} />
@@ -313,6 +358,36 @@ function ProfileRow({
       <td className="py-1 text-right">{target}</td>
       <td className={`py-1 text-right font-semibold ${color}`}>{adjusted}</td>
     </tr>
+  );
+}
+
+/**
+ * Text-mode numeric input that lets the user freely clear and
+ * retype values without the browser clamping to min/max.
+ */
+function VolumeInput({
+  label,
+  unit,
+  value,
+  onChange,
+}: {
+  label: string;
+  unit: string;
+  value: string;
+  onChange: (val: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <label className="text-xs text-gray-400 shrink-0">{label}</label>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 text-right focus:border-amber-500 focus:outline-none"
+      />
+      <span className="text-xs text-gray-500">{unit}</span>
+    </div>
   );
 }
 
