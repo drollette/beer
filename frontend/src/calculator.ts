@@ -1,8 +1,9 @@
 /**
- * Brew Day Water Chemistry Calculator
+ * Brew Day Water Chemistry Calculator — Process-Based Model
  *
- * Calculates salt additions (Calcium Chloride, Gypsum, Epsom Salt) and
- * lactic acid needed to transform source water into target style water.
+ * Calculates salt additions and lactic acid for separate mash and
+ * sparge water volumes, then produces a combined mineral profile
+ * for the finished beer.
  *
  * All salt contributions are per gram per gallon:
  *
@@ -36,17 +37,6 @@ export interface StyleTarget {
   ph_target: number;
 }
 
-export interface SaltAdditions {
-  /** grams of Calcium Chloride (CaCl2·2H2O) */
-  calciumChloride: number;
-  /** grams of Gypsum (CaSO4·2H2O) */
-  gypsum: number;
-  /** grams of Epsom Salt (MgSO4·7H2O) */
-  epsom: number;
-  /** mL of 88% Lactic Acid */
-  lacticAcid: number;
-}
-
 export interface AdjustedProfile {
   ca: number;
   mg: number;
@@ -56,9 +46,18 @@ export interface AdjustedProfile {
   ph: number;
 }
 
-export interface CalculationResult {
-  additions: SaltAdditions;
+export interface ProcessResult {
+  mash: {
+    gypsum: number;
+    calciumChloride: number;
+    epsom: number;
+    lacticAcid: number;
+  };
+  sparge: {
+    lacticAcid: number;
+  };
   adjusted: AdjustedProfile;
+  totalWater: number;
 }
 
 // ── Salt contribution factors (ppm per gram per gallon) ──────────────
@@ -105,34 +104,36 @@ function neutralizationFraction(targetPh: number): number {
  * To push below that the brewer must add acid to overcome
  * the grain's own buffering capacity.
  *
- * Typical pale-malt buffer ≈ 7 mEq per pH unit per gallon of
- * strike water (derived from ~45 mEq/kg at standard grist ratios).
+ * Typical pale-malt buffer ≈ 2.6 mEq per pH unit per lb of grain
+ * (derived from ~45 mEq/kg at standard grist ratios).
  */
 const GRAIN_DI_MASH_PH = 5.7;
-const GRAIN_BUFFER_MEQ_PER_PH_PER_GAL = 7;
+const GRAIN_BUFFER_MEQ_PER_PH_PER_LB = 2.6;
+
+// ── Sparge water constants ───────────────────────────────────────────
+/**
+ * Sparge water target pH: 5.6 prevents tannin extraction.
+ * At pH 5.6, ~95 % of bicarbonate alkalinity must be neutralized
+ * (only ~5 % remains in equilibrium).
+ */
+export const SPARGE_TARGET_PH = 5.6;
+const SPARGE_NEUT_FRACTION = 0.95;
+
+// ── Acid calculations ────────────────────────────────────────────────
 
 /**
- * Calculate mL of 88 % lactic acid needed to reach the target mash pH.
+ * Calculate mL of 88 % lactic acid for the **mash**.
  *
  * Two models are evaluated and the larger value is returned:
- *
- * 1. **Alkalinity neutralization** – for water with meaningful
- *    bicarbonate buffering. A pH-dependent fraction of the source
- *    alkalinity is neutralized using the mEq formula.
- *
- * 2. **Grain-buffer override** – for RO / distilled / very-low-alk
- *    water where the grain's natural buffering from ~5.7 down to the
- *    target pH is the dominant factor.
- *
- * @param sourceAlkalinity  - Source water alkalinity in ppm as CaCO3
- * @param targetPh          - Desired mash pH (e.g. 5.3)
- * @param strikeWaterLiters - Volume of mash/strike water in liters
- * @returns mL of 88 % lactic acid, rounded to one decimal place
+ * 1. Alkalinity neutralization — for water with bicarbonate buffering.
+ * 2. Grain-buffer override — for RO / low-alk water where the grain's
+ *    natural buffering from ~5.7 to target is the dominant factor.
  */
 export function calculateAcid(
   sourceAlkalinity: number,
   targetPh: number,
   strikeWaterLiters: number,
+  grainWeightLbs: number,
 ): number {
   // Model 1: alkalinity neutralization (dominates for normal tap water)
   const fraction = neutralizationFraction(targetPh);
@@ -142,11 +143,25 @@ export function calculateAcid(
 
   // Model 2: grain-buffer acid (dominates for RO/low-alk water)
   const phDrop = Math.max(0, GRAIN_DI_MASH_PH - targetPh);
-  const strikeGal = strikeWaterLiters / GAL_TO_LITERS;
-  const grainMeq = phDrop * GRAIN_BUFFER_MEQ_PER_PH_PER_GAL * strikeGal;
+  const grainMeq = phDrop * GRAIN_BUFFER_MEQ_PER_PH_PER_LB * grainWeightLbs;
   const grainAcid = grainMeq * MEQ_ML_88_LACTIC;
 
   return round(Math.max(alkAcid, grainAcid), 1);
+}
+
+/**
+ * Calculate mL of 88 % lactic acid for the **sparge** water.
+ *
+ * No grain buffer — purely alkalinity neutralization to reach
+ * the safe sparge pH of 5.6.
+ */
+export function calculateSpargeAcid(
+  sourceAlkalinity: number,
+  spargeWaterLiters: number,
+): number {
+  const alkToNeutralize = sourceAlkalinity * SPARGE_NEUT_FRACTION;
+  const mEq = (alkToNeutralize / MEQ_ALK_PER_LITER) * spargeWaterLiters;
+  return round(mEq * MEQ_ML_88_LACTIC, 1);
 }
 
 // ── Main calculator ──────────────────────────────────────────────────
@@ -154,9 +169,12 @@ export function calculateAcid(
 export function calculate(
   source: WaterProfile,
   target: StyleTarget,
-  batchGallons: number,
-  strikeWaterGal: number,
-): CalculationResult {
+  strikeGal: number,
+  spargeGal: number,
+  grainLbs: number,
+): ProcessResult {
+  const totalGal = strikeGal + spargeGal;
+
   // Deltas needed (ppm) – clamp to zero (we only add, not remove)
   const deltaCa = Math.max(0, target.ca - source.ca);
   const deltaMg = Math.max(0, target.mg - source.mg);
@@ -176,20 +194,26 @@ export function calculate(
   const cacl2PerGal = remainingCa / CACL2_CA;
   const clFromCaCl2 = cacl2PerGal * CACL2_CL;
 
-  // Total grams for the full batch
-  const gypsum = round(gypsumPerGal * batchGallons, 1);
-  const epsom = round(epsomPerGal * batchGallons, 1);
-  const calciumChloride = round(cacl2PerGal * batchGallons, 1);
+  // Total grams for the full batch (added to mash water)
+  const gypsum = round(gypsumPerGal * totalGal, 1);
+  const epsom = round(epsomPerGal * totalGal, 1);
+  const calciumChloride = round(cacl2PerGal * totalGal, 1);
 
-  // Step 4: Lactic acid — mEq formula on strike water only
-  const strikeWaterLiters = strikeWaterGal * GAL_TO_LITERS;
-  const lacticAcid = calculateAcid(
+  // Mash acid — includes grain-buffer model
+  const mashAcid = calculateAcid(
     source.alkalinity,
     target.ph_target,
-    strikeWaterLiters,
+    strikeGal * GAL_TO_LITERS,
+    grainLbs,
   );
 
-  // Adjusted ion profile (based on full batch volume)
+  // Sparge acid — alkalinity neutralization only, target pH 5.6
+  const spargeAcid = calculateSpargeAcid(
+    source.alkalinity,
+    spargeGal * GAL_TO_LITERS,
+  );
+
+  // Adjusted ion profile (concentration based on total water volume)
   const adjusted: AdjustedProfile = {
     ca: round(source.ca + caFromGypsum + cacl2PerGal * CACL2_CA, 1),
     mg: round(source.mg + epsomPerGal * EPSOM_MG, 1),
@@ -200,8 +224,10 @@ export function calculate(
   };
 
   return {
-    additions: { calciumChloride, gypsum, epsom, lacticAcid },
+    mash: { gypsum, calciumChloride, epsom, lacticAcid: mashAcid },
+    sparge: { lacticAcid: spargeAcid },
     adjusted,
+    totalWater: round(totalGal, 1),
   };
 }
 
