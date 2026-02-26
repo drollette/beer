@@ -176,8 +176,17 @@ export function calculateAcid(
 export function calculateSpargeAcid(
   sourceAlkalinity: number,
   spargeWaterLiters: number,
+  spargeTargetPh: number = SPARGE_TARGET_PH,
 ): number {
-  const alkToNeutralize = sourceAlkalinity * SPARGE_NEUT_FRACTION;
+  // Scale neutralization fraction by how far below neutral the target is.
+  // At pH 5.6 → 95 %; at pH 7.0 → 0 %; linearly interpolated.
+  const NEUTRAL_PH = 7.0;
+  const fraction =
+    spargeTargetPh >= NEUTRAL_PH
+      ? 0
+      : SPARGE_NEUT_FRACTION *
+        Math.min(1, (NEUTRAL_PH - spargeTargetPh) / (NEUTRAL_PH - SPARGE_TARGET_PH));
+  const alkToNeutralize = sourceAlkalinity * fraction;
   const mEq = (alkToNeutralize / MEQ_ALK_PER_LITER) * spargeWaterLiters;
   return round(mEq * MEQ_ML_88_LACTIC, 1);
 }
@@ -191,6 +200,7 @@ export function calculate(
   grainLbs: number,
   mashThicknessQtsPerLb: number = DEFAULT_MASH_THICKNESS,
   boilTimeHrs: number = DEFAULT_BOIL_TIME_HRS,
+  spargeTargetPh: number = SPARGE_TARGET_PH,
 ): ProcessResult {
   // ── Derive volumes from losses ──────────────────────────────────
   const grainAbsorptionGal = grainLbs * GRAIN_ABSORPTION_GAL_PER_LB;
@@ -234,10 +244,11 @@ export function calculate(
     grainLbs,
   );
 
-  // Sparge acid — based on actual sparge volume, target pH 5.6
+  // Sparge acid — based on actual sparge volume
   const spargeAcid = calculateSpargeAcid(
     source.alkalinity,
     spargeGal * GAL_TO_LITERS,
+    spargeTargetPh,
   );
 
   // Adjusted ion profile (concentration based on total water volume)

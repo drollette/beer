@@ -106,18 +106,22 @@ export default function App() {
 
   // String-backed inputs so the user can freely clear and retype
   const [grainStr, setGrainStr] = useState("12");
-  const [targetVolStr, setTargetVolStr] = useState("8.0");
+  const [targetVolStr, setTargetVolStr] = useState("5.0");
   const [mashThicknessStr, setMashThicknessStr] = useState(
     DEFAULT_MASH_THICKNESS.toString(),
   );
   const [boilTimeStr, setBoilTimeStr] = useState(
     DEFAULT_BOIL_TIME_HRS.toString(),
   );
+  const [spargePhStr, setSpargePhStr] = useState(
+    SPARGE_TARGET_PH.toString(),
+  );
 
   const grainLbs = toNum(grainStr);
   const targetVol = toNum(targetVolStr);
   const mashThickness = toNum(mashThicknessStr) || DEFAULT_MASH_THICKNESS;
   const boilTime = toNum(boilTimeStr) || DEFAULT_BOIL_TIME_HRS;
+  const spargePh = toNum(spargePhStr) || SPARGE_TARGET_PH;
 
   // ── API + localStorage ─────────────────────────────────────────
 
@@ -165,8 +169,8 @@ export default function App() {
   const target = styles.find((s) => s.name === selectedStyle) ?? styles[0];
 
   const result: ProcessResult = useMemo(
-    () => calculate(source, target, targetVol, grainLbs, mashThickness, boilTime),
-    [source, target, targetVol, grainLbs, mashThickness, boilTime],
+    () => calculate(source, target, targetVol, grainLbs, mashThickness, boilTime, spargePh),
+    [source, target, targetVol, grainLbs, mashThickness, boilTime, spargePh],
   );
 
   const sourceLabel = profileLabel(source);
@@ -247,14 +251,19 @@ export default function App() {
 
       {/* ── Sparge Water ────────────────────────────────────────── */}
       <Section title="Sparge Water">
-        <p className="text-xs text-gray-500 mb-3">
-          Sparge Volume: <span className="text-gray-300 font-semibold">{result.spargeGal} gal ({galToL(result.spargeGal)} L)</span>
-        </p>
+        <div className="flex flex-wrap gap-4 mb-3 items-center">
+          <p className="text-xs text-gray-500">
+            Sparge Volume: <span className="text-gray-300 font-semibold">{result.spargeGal} gal ({galToL(result.spargeGal)} L)</span>
+          </p>
+          <VolumeInput
+            label="Target pH"
+            unit=""
+            value={spargePhStr}
+            onChange={setSpargePhStr}
+          />
+        </div>
 
         <AdditionRow label="88% Lactic Acid" value={result.sparge.lacticAcid} unit="mL" />
-        <p className="text-xs text-gray-500 mt-1">
-          Target sparge pH: {SPARGE_TARGET_PH}
-        </p>
       </Section>
 
       {/* ── Final Summary ───────────────────────────────────────── */}
