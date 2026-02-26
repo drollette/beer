@@ -3,24 +3,18 @@ compatibility_date = "2024-12-01"
 main = "src/worker.ts"
 assets = { directory = "./dist" }
 
+# ── Default data (same for all environments) ─────────────────────────
+
+[vars]
+DEFAULT_BASELINE = '{"ca":37.1,"mg":7.0,"na":43.7,"cl":14.2,"so4":56.2,"alkalinity":151.5,"ph":7.9}'
+DEFAULT_STYLES = '[{"name":"Belgian Tripel","ca":50,"mg":5,"na":15,"cl":35,"so4":40,"ph_target":5.3},{"name":"Hefeweizen","ca":50,"mg":10,"na":10,"cl":60,"so4":30,"ph_target":5.4},{"name":"IPA","ca":100,"mg":15,"na":25,"cl":50,"so4":275,"ph_target":5.3},{"name":"Marzen","ca":75,"mg":15,"na":10,"cl":60,"so4":80,"ph_target":5.4},{"name":"Mexican Lager","ca":45,"mg":5,"na":10,"cl":25,"so4":30,"ph_target":5.3},{"name":"NEIPA","ca":75,"mg":10,"na":20,"cl":150,"so4":50,"ph_target":5.3},{"name":"Stout","ca":100,"mg":15,"na":30,"cl":125,"so4":50,"ph_target":5.4}]'
+
 # ── Staging ──────────────────────────────────────────────────────────
 [env.staging]
 name = "brew-day-water-helper-staging"
 routes = [{ pattern = "beer-dev.w7hak.com", custom_domain = true }]
 
-[[env.staging.d1_databases]]
-binding = "DB"
-database_name = "beer-db-dev"
-database_id = "0dd11726-22be-4bf0-98c5-a0451a3de268"
-migrations_dir = "../migrations"
-
 # ── Production ───────────────────────────────────────────────────────
 [env.production]
 name = "brew-day-water-helper"
 routes = [{ pattern = "beer.w7hak.com", custom_domain = true }]
-
-[[env.production.d1_databases]]
-binding = "DB"
-database_name = "beer-db-prod"
-database_id = "8466a0ec-7b87-4a39-a7a8-38d01202f85e"
-migrations_dir = "../migrations"
