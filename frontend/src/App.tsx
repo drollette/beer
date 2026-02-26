@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import {
   calculate,
   SPARGE_TARGET_PH,
+  DEFAULT_MASH_THICKNESS,
+  DEFAULT_BOIL_TIME_HRS,
   type WaterProfile,
   type StyleTarget,
   type ProcessResult,
@@ -56,9 +58,9 @@ function profilesEqual(a: WaterProfile, b: WaterProfile): boolean {
 }
 
 function profileLabel(source: WaterProfile): string {
-  if (profilesEqual(source, DEFAULT_SOURCE)) return "Meridian, ID / 83709 Well";
+  if (profilesEqual(source, DEFAULT_SOURCE)) return "Default Water Profile";
   if (profilesEqual(source, RO_SOURCE)) return "RO Water";
-  return "Custom Profile";
+  return "Custom Water Profile";
 }
 
 function loadSource(): WaterProfile {
@@ -77,6 +79,24 @@ function toNum(s: string): number {
   return isNaN(n) || n < 0 ? 0 : n;
 }
 
+// ── Unit conversions ─────────────────────────────────────────────────
+
+const GAL_TO_L = 3.78541;
+const LB_TO_KG = 0.453592;
+const QT_PER_LB_TO_L_PER_KG = GAL_TO_L / 4 / LB_TO_KG; // ≈ 2.086
+
+function galToL(gal: number): string {
+  return (gal * GAL_TO_L).toFixed(1);
+}
+
+function lbToKg(lb: number): string {
+  return (lb * LB_TO_KG).toFixed(1);
+}
+
+function qtLbToLKg(qtPerLb: number): string {
+  return (qtPerLb * QT_PER_LB_TO_L_PER_KG).toFixed(1);
+}
+
 // ── App ──────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -84,45 +104,24 @@ export default function App() {
   const [styles, setStyles] = useState<StyleTarget[]>(FALLBACK_STYLES);
   const [selectedStyle, setSelectedStyle] = useState("IPA");
 
-  // String-backed volume/weight inputs so the user can freely
-  // clear and retype values without the browser clamping to min.
-  const [strikeStr, setStrikeStr] = useState("6.0");
-  const [spargeStr, setSpargeStr] = useState("2.0");
+  // String-backed inputs so the user can freely clear and retype
   const [grainStr, setGrainStr] = useState("12");
-  const [targetVolStr, setTargetVolStr] = useState("8.0");
+  const [targetVolStr, setTargetVolStr] = useState("5.0");
+  const [mashThicknessStr, setMashThicknessStr] = useState(
+    DEFAULT_MASH_THICKNESS.toString(),
+  );
+  const [boilTimeStr, setBoilTimeStr] = useState(
+    DEFAULT_BOIL_TIME_HRS.toString(),
+  );
+  const [spargePhStr, setSpargePhStr] = useState(
+    SPARGE_TARGET_PH.toString(),
+  );
 
-  const strike = toNum(strikeStr);
-  const spargeVal = toNum(spargeStr);
   const grainLbs = toNum(grainStr);
   const targetVol = toNum(targetVolStr);
-
-  // ── Volume auto-linking ────────────────────────────────────────
-  // Strike or Target Volume changes → recalculate Sparge
-  // Sparge changes → recalculate Target Volume
-
-  const handleTargetVolChange = (val: string) => {
-    setTargetVolStr(val);
-    const tv = parseFloat(val);
-    if (!isNaN(tv) && tv >= 0) {
-      setSpargeStr(Math.max(0, tv - strike).toFixed(1));
-    }
-  };
-
-  const handleStrikeChange = (val: string) => {
-    setStrikeStr(val);
-    const s = parseFloat(val);
-    if (!isNaN(s) && s >= 0) {
-      setSpargeStr(Math.max(0, targetVol - s).toFixed(1));
-    }
-  };
-
-  const handleSpargeChange = (val: string) => {
-    setSpargeStr(val);
-    const sp = parseFloat(val);
-    if (!isNaN(sp) && sp >= 0) {
-      setTargetVolStr((strike + sp).toFixed(1));
-    }
-  };
+  const mashThickness = toNum(mashThicknessStr) || DEFAULT_MASH_THICKNESS;
+  const boilTime = toNum(boilTimeStr) || DEFAULT_BOIL_TIME_HRS;
+  const spargePh = toNum(spargePhStr) || SPARGE_TARGET_PH;
 
   // ── API + localStorage ─────────────────────────────────────────
 
@@ -170,8 +169,8 @@ export default function App() {
   const target = styles.find((s) => s.name === selectedStyle) ?? styles[0];
 
   const result: ProcessResult = useMemo(
-    () => calculate(source, target, strike, spargeVal, grainLbs),
-    [source, target, strike, spargeVal, grainLbs],
+    () => calculate(source, target, targetVol, grainLbs, mashThickness, boilTime, spargePh),
+    [source, target, targetVol, grainLbs, mashThickness, boilTime, spargePh],
   );
 
   const sourceLabel = profileLabel(source);
@@ -186,7 +185,7 @@ export default function App() {
         <p className="text-sm text-gray-500 mt-1">{sourceLabel}</p>
       </header>
 
-      {/* Style selector */}
+      {/* Style selector + batch inputs */}
       <div className="mb-6">
         <label className="block text-xs text-gray-400 mb-1">Beer Style</label>
         <select
@@ -200,24 +199,44 @@ export default function App() {
             </option>
           ))}
         </select>
+        <div className="flex flex-wrap gap-4 mt-3">
+          <VolumeInput
+            label="Target Volume"
+            unit="gal"
+            value={targetVolStr}
+            onChange={setTargetVolStr}
+            metric={`${galToL(targetVol)} L`}
+          />
+          <VolumeInput
+            label="Boil Time"
+            unit="hrs"
+            value={boilTimeStr}
+            onChange={setBoilTimeStr}
+          />
+        </div>
       </div>
 
       {/* ── Mash Water ──────────────────────────────────────────── */}
       <Section title="Mash Water">
         <div className="flex flex-wrap gap-4 mb-4">
           <VolumeInput
-            label="Strike Vol"
-            unit="gal"
-            value={strikeStr}
-            onChange={handleStrikeChange}
-          />
-          <VolumeInput
             label="Grain Weight"
             unit="lbs"
             value={grainStr}
             onChange={setGrainStr}
+            metric={`${lbToKg(grainLbs)} kg`}
+          />
+          <VolumeInput
+            label="Mash Thickness"
+            unit="qt/lb"
+            value={mashThicknessStr}
+            onChange={setMashThicknessStr}
+            metric={`${qtLbToLKg(mashThickness)} L/kg`}
           />
         </div>
+        <p className="text-xs text-gray-500 mb-3">
+          Strike Water: <span className="text-gray-300 font-semibold">{result.strikeGal} gal ({galToL(result.strikeGal)} L)</span>
+        </p>
 
         <h3 className="text-xs text-gray-500 mb-2">Salt additions (into mash)</h3>
         <AdditionRow label="Gypsum (CaSO4)" value={result.mash.gypsum} unit="g" />
@@ -232,30 +251,33 @@ export default function App() {
 
       {/* ── Sparge Water ────────────────────────────────────────── */}
       <Section title="Sparge Water">
-        <div className="mb-4">
+        <div className="flex flex-wrap gap-4 mb-3 items-center">
+          <p className="text-xs text-gray-500">
+            Sparge Volume: <span className="text-gray-300 font-semibold">{result.spargeGal} gal ({galToL(result.spargeGal)} L)</span>
+          </p>
           <VolumeInput
-            label="Sparge Vol"
-            unit="gal"
-            value={spargeStr}
-            onChange={handleSpargeChange}
+            label="Target pH"
+            unit=""
+            value={spargePhStr}
+            onChange={setSpargePhStr}
           />
         </div>
 
         <AdditionRow label="88% Lactic Acid" value={result.sparge.lacticAcid} unit="mL" />
-        <p className="text-xs text-gray-500 mt-1">
-          Target sparge pH: {SPARGE_TARGET_PH}
-        </p>
       </Section>
 
       {/* ── Final Summary ───────────────────────────────────────── */}
       <Section title="Final Summary">
-        <div className="mb-4">
-          <VolumeInput
-            label="Target Volume"
-            unit="gal"
-            value={targetVolStr}
-            onChange={handleTargetVolChange}
-          />
+        <div className="mb-4 p-3 bg-gray-800/50 rounded text-xs text-gray-400">
+          <p>
+            Total Water Needed:{" "}
+            <span className="text-gray-200 font-semibold">{result.totalWater} gal ({galToL(result.totalWater)} L)</span>
+            {" "}(Includes {result.totalLossGal} gal / {galToL(result.totalLossGal)} L loss to grain/boil)
+          </p>
+          <p className="mt-1 text-gray-500">
+            Grain absorption: {result.grainAbsorptionGal} gal ({galToL(result.grainAbsorptionGal)} L)
+            {" · "}Boil-off: {result.boilOffGal} gal ({galToL(result.boilOffGal)} L)
+          </p>
         </div>
 
         <div className="overflow-x-auto">
@@ -296,7 +318,7 @@ export default function App() {
             onClick={() => setSource(DEFAULT_SOURCE)}
             className="flex-1 py-2 text-xs text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded hover:border-amber-400/50 transition-colors"
           >
-            Reset to Meridian defaults
+            Reset to defaults
           </button>
           <button
             onClick={() => setSource(RO_SOURCE)}
@@ -370,11 +392,13 @@ function VolumeInput({
   unit,
   value,
   onChange,
+  metric,
 }: {
   label: string;
   unit: string;
   value: string;
   onChange: (val: string) => void;
+  metric?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -386,7 +410,9 @@ function VolumeInput({
         onChange={(e) => onChange(e.target.value)}
         className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 text-right focus:border-amber-500 focus:outline-none"
       />
-      <span className="text-xs text-gray-500">{unit}</span>
+      <span className="text-xs text-gray-500">
+        {unit}{metric ? ` (${metric})` : ""}
+      </span>
     </div>
   );
 }
