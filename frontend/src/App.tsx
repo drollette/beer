@@ -163,7 +163,7 @@ export default function App() {
         <p className="text-sm text-gray-500 mt-1">{sourceLabel}</p>
       </header>
 
-      {/* Style selector */}
+      {/* Style selector + batch inputs */}
       <div className="mb-6">
         <label className="block text-xs text-gray-400 mb-1">Beer Style</label>
         <select
@@ -177,6 +177,20 @@ export default function App() {
             </option>
           ))}
         </select>
+        <div className="flex flex-wrap gap-4 mt-3">
+          <VolumeInput
+            label="Target Volume"
+            unit="gal"
+            value={targetVolStr}
+            onChange={setTargetVolStr}
+          />
+          <VolumeInput
+            label="Boil Time"
+            unit="hrs"
+            value={boilTimeStr}
+            onChange={setBoilTimeStr}
+          />
+        </div>
       </div>
 
       {/* ── Mash Water ──────────────────────────────────────────── */}
@@ -224,21 +238,6 @@ export default function App() {
 
       {/* ── Final Summary ───────────────────────────────────────── */}
       <Section title="Final Summary">
-        <div className="flex flex-wrap gap-4 mb-4">
-          <VolumeInput
-            label="Target Volume"
-            unit="gal"
-            value={targetVolStr}
-            onChange={setTargetVolStr}
-          />
-          <VolumeInput
-            label="Boil Time"
-            unit="hrs"
-            value={boilTimeStr}
-            onChange={setBoilTimeStr}
-          />
-        </div>
-
         <div className="mb-4 p-3 bg-gray-800/50 rounded text-xs text-gray-400">
           <p>
             Total Water Needed:{" "}
