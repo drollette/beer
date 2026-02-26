@@ -79,6 +79,24 @@ function toNum(s: string): number {
   return isNaN(n) || n < 0 ? 0 : n;
 }
 
+// ── Unit conversions ─────────────────────────────────────────────────
+
+const GAL_TO_L = 3.78541;
+const LB_TO_KG = 0.453592;
+const QT_PER_LB_TO_L_PER_KG = GAL_TO_L / 4 / LB_TO_KG; // ≈ 2.086
+
+function galToL(gal: number): string {
+  return (gal * GAL_TO_L).toFixed(1);
+}
+
+function lbToKg(lb: number): string {
+  return (lb * LB_TO_KG).toFixed(1);
+}
+
+function qtLbToLKg(qtPerLb: number): string {
+  return (qtPerLb * QT_PER_LB_TO_L_PER_KG).toFixed(1);
+}
+
 // ── App ──────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -183,6 +201,7 @@ export default function App() {
             unit="gal"
             value={targetVolStr}
             onChange={setTargetVolStr}
+            metric={`${galToL(targetVol)} L`}
           />
           <VolumeInput
             label="Boil Time"
@@ -201,16 +220,18 @@ export default function App() {
             unit="lbs"
             value={grainStr}
             onChange={setGrainStr}
+            metric={`${lbToKg(grainLbs)} kg`}
           />
           <VolumeInput
             label="Mash Thickness"
             unit="qt/lb"
             value={mashThicknessStr}
             onChange={setMashThicknessStr}
+            metric={`${qtLbToLKg(mashThickness)} L/kg`}
           />
         </div>
         <p className="text-xs text-gray-500 mb-3">
-          Strike Water: <span className="text-gray-300 font-semibold">{result.strikeGal} gal</span>
+          Strike Water: <span className="text-gray-300 font-semibold">{result.strikeGal} gal ({galToL(result.strikeGal)} L)</span>
         </p>
 
         <h3 className="text-xs text-gray-500 mb-2">Salt additions (into mash)</h3>
@@ -227,7 +248,7 @@ export default function App() {
       {/* ── Sparge Water ────────────────────────────────────────── */}
       <Section title="Sparge Water">
         <p className="text-xs text-gray-500 mb-3">
-          Sparge Volume: <span className="text-gray-300 font-semibold">{result.spargeGal} gal</span>
+          Sparge Volume: <span className="text-gray-300 font-semibold">{result.spargeGal} gal ({galToL(result.spargeGal)} L)</span>
         </p>
 
         <AdditionRow label="88% Lactic Acid" value={result.sparge.lacticAcid} unit="mL" />
@@ -241,12 +262,12 @@ export default function App() {
         <div className="mb-4 p-3 bg-gray-800/50 rounded text-xs text-gray-400">
           <p>
             Total Water Needed:{" "}
-            <span className="text-gray-200 font-semibold">{result.totalWater} gal</span>
-            {" "}(Includes {result.totalLossGal} gal loss to grain/boil)
+            <span className="text-gray-200 font-semibold">{result.totalWater} gal ({galToL(result.totalWater)} L)</span>
+            {" "}(Includes {result.totalLossGal} gal / {galToL(result.totalLossGal)} L loss to grain/boil)
           </p>
           <p className="mt-1 text-gray-500">
-            Grain absorption: {result.grainAbsorptionGal} gal
-            {" · "}Boil-off: {result.boilOffGal} gal
+            Grain absorption: {result.grainAbsorptionGal} gal ({galToL(result.grainAbsorptionGal)} L)
+            {" · "}Boil-off: {result.boilOffGal} gal ({galToL(result.boilOffGal)} L)
           </p>
         </div>
 
@@ -362,11 +383,13 @@ function VolumeInput({
   unit,
   value,
   onChange,
+  metric,
 }: {
   label: string;
   unit: string;
   value: string;
   onChange: (val: string) => void;
+  metric?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -378,7 +401,9 @@ function VolumeInput({
         onChange={(e) => onChange(e.target.value)}
         className="w-16 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 text-right focus:border-amber-500 focus:outline-none"
       />
-      <span className="text-xs text-gray-500">{unit}</span>
+      <span className="text-xs text-gray-500">
+        {unit}{metric ? ` (${metric})` : ""}
+      </span>
     </div>
   );
 }
