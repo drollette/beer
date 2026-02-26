@@ -57,7 +57,12 @@ export interface ProcessResult {
     lacticAcid: number;
   };
   adjusted: AdjustedProfile;
+  strikeGal: number;
+  spargeGal: number;
   totalWater: number;
+  grainAbsorptionGal: number;
+  boilOffGal: number;
+  totalLossGal: number;
 }
 
 // ── Salt contribution factors (ppm per gram per gallon) ──────────────
@@ -109,6 +114,19 @@ function neutralizationFraction(targetPh: number): number {
  */
 const GRAIN_DI_MASH_PH = 5.7;
 const GRAIN_BUFFER_MEQ_PER_PH_PER_LB = 2.6;
+
+// ── Volumetric loss constants ────────────────────────────────────────
+/** Grain absorbs ~0.125 gal of wort per pound of grain. */
+export const GRAIN_ABSORPTION_GAL_PER_LB = 0.125;
+
+/** Typical boil-off rate: 1.25 gal per hour of boiling. */
+export const BOIL_OFF_GAL_PER_HR = 1.25;
+
+/** Default mash thickness: 1.5 quarts of water per pound of grain. */
+export const DEFAULT_MASH_THICKNESS = 1.5;
+
+/** Default boil duration in hours. */
+export const DEFAULT_BOIL_TIME_HRS = 1;
 
 // ── Sparge water constants ───────────────────────────────────────────
 /**
@@ -169,11 +187,20 @@ export function calculateSpargeAcid(
 export function calculate(
   source: WaterProfile,
   target: StyleTarget,
-  strikeGal: number,
-  spargeGal: number,
+  targetVolGal: number,
   grainLbs: number,
+  mashThicknessQtsPerLb: number = DEFAULT_MASH_THICKNESS,
+  boilTimeHrs: number = DEFAULT_BOIL_TIME_HRS,
 ): ProcessResult {
-  const totalGal = strikeGal + spargeGal;
+  // ── Derive volumes from losses ──────────────────────────────────
+  const grainAbsorptionGal = grainLbs * GRAIN_ABSORPTION_GAL_PER_LB;
+  const boilOffGal = boilTimeHrs * BOIL_OFF_GAL_PER_HR;
+  const totalLossGal = grainAbsorptionGal + boilOffGal;
+  const totalWaterGal = targetVolGal + totalLossGal;
+
+  // Strike = (grain lbs × mash thickness qts/lb) ÷ 4 qts/gal
+  const strikeGal = (grainLbs * mashThicknessQtsPerLb) / 4;
+  const spargeGal = Math.max(0, totalWaterGal - strikeGal);
 
   // Deltas needed (ppm) – clamp to zero (we only add, not remove)
   const deltaCa = Math.max(0, target.ca - source.ca);
@@ -194,12 +221,12 @@ export function calculate(
   const cacl2PerGal = remainingCa / CACL2_CA;
   const clFromCaCl2 = cacl2PerGal * CACL2_CL;
 
-  // Total grams for the full batch (added to mash water)
-  const gypsum = round(gypsumPerGal * totalGal, 1);
-  const epsom = round(epsomPerGal * totalGal, 1);
-  const calciumChloride = round(cacl2PerGal * totalGal, 1);
+  // Total grams for the full batch (based on total water volume)
+  const gypsum = round(gypsumPerGal * totalWaterGal, 1);
+  const epsom = round(epsomPerGal * totalWaterGal, 1);
+  const calciumChloride = round(cacl2PerGal * totalWaterGal, 1);
 
-  // Mash acid — includes grain-buffer model
+  // Mash acid — based on actual strike volume, includes grain-buffer model
   const mashAcid = calculateAcid(
     source.alkalinity,
     target.ph_target,
@@ -207,7 +234,7 @@ export function calculate(
     grainLbs,
   );
 
-  // Sparge acid — alkalinity neutralization only, target pH 5.6
+  // Sparge acid — based on actual sparge volume, target pH 5.6
   const spargeAcid = calculateSpargeAcid(
     source.alkalinity,
     spargeGal * GAL_TO_LITERS,
@@ -227,7 +254,12 @@ export function calculate(
     mash: { gypsum, calciumChloride, epsom, lacticAcid: mashAcid },
     sparge: { lacticAcid: spargeAcid },
     adjusted,
-    totalWater: round(totalGal, 1),
+    strikeGal: round(strikeGal, 1),
+    spargeGal: round(spargeGal, 1),
+    totalWater: round(totalWaterGal, 1),
+    grainAbsorptionGal: round(grainAbsorptionGal, 1),
+    boilOffGal: round(boilOffGal, 1),
+    totalLossGal: round(totalLossGal, 1),
   };
 }
 
